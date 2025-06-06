@@ -242,6 +242,34 @@ pub fn humanbyte_ops(input: TokenStream) -> TokenStream {
             }
         }
 
+        #[cfg(target_pointer_width = "64")]
+        impl core::ops::Add<#name> for usize {
+            type Output = #name;
+            #[inline(always)]
+            fn add(self, rhs: #name) -> #name {
+                #name(rhs.0 + (self as u64))
+            }
+        }
+
+
+        #[cfg(target_pointer_width = "64")]
+        impl core::ops::Sub<#name> for usize {
+            type Output = #name;
+            #[inline(always)]
+            fn sub(self, rhs: #name) -> #name {
+                #name(self as u64 - rhs.0)
+            }
+        }
+
+        #[cfg(target_pointer_width = "64")]
+        impl core::ops::Mul<#name> for usize {
+            type Output = #name;
+            #[inline(always)]
+            fn mul(self, rhs: #name) -> #name {
+                #name(rhs.0 * (self as u64))
+            }
+        }
+
         impl #name {
             /// Provides `HumanByteRange` with explicit lower and upper bounds.
             pub fn range<I: Into<Self>>(start: I, stop: I) -> ::humanbyte::HumanByteRange<Self> {
@@ -339,6 +367,13 @@ pub fn humanbyte_parse(input: TokenStream) -> TokenStream {
             #[inline(always)]
             pub const fn as_u64(&self) -> u64 {
                 self.0
+            }
+
+            /// Returns the inner value as usize.
+            #[cfg(target_pointer_width = "64")]
+            #[inline(always)]
+            pub const fn as_usize(&self) -> usize {
+                self.0 as usize
             }
         }
     };
