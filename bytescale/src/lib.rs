@@ -194,6 +194,42 @@ mod tests {
     }
 
     #[test]
+    fn test_sum() {
+        let sizes = [ByteScale::kib(1), ByteScale::kib(2), ByteScale::kib(3)];
+        assert_eq!(sizes.iter().sum::<ByteScale>(), ByteScale::kib(6));
+        assert_eq!(sizes.into_iter().sum::<ByteScale>(), ByteScale::kib(6));
+    }
+
+    #[test]
+    fn test_exabytes() {
+        assert_eq!(ByteScale::eib(1).as_u64(), 1_152_921_504_606_846_976);
+        assert_eq!(ByteScale::eb(1).as_u64(), 1_000_000_000_000_000_000);
+        // the display/parse roundtrip works at the top of the u64 range
+        let max = ByteScale(u64::MAX);
+        assert_display!("16.0 EiB", max);
+        assert_eq!("15 EiB".parse::<ByteScale>().unwrap(), ByteScale::eib(15));
+        // 16 EiB is exactly 2^64: one past u64::MAX, so it must error
+        assert!("16 EiB".parse::<ByteScale>().is_err());
+    }
+
+    #[test]
+    fn test_float_accessors() {
+        assert_eq!(ByteScale::kib(1).as_kib(), 1.0);
+        assert_eq!(ByteScale::kib(1).as_kb(), 1.024);
+        assert_eq!(ByteScale::gib(3).as_mib(), 3072.0);
+    }
+
+    #[test]
+    fn test_display_precision() {
+        let x = ByteScale::kib(1) + 512u64;
+        assert_eq!(format!("{x:.2}"), "1.50 KiB");
+        assert_eq!(format!("{x:.0}"), "2 KiB");
+        assert_eq!(format!("{x}"), "1.5 KiB");
+        // precision composes with width/alignment
+        assert_eq!(format!("|{x:>10.2}|"), "|  1.50 KiB|");
+    }
+
+    #[test]
     #[should_panic(expected = "byte size overflows u64")]
     fn test_constructor_overflow() {
         // 20,000 PB doesn't fit in u64

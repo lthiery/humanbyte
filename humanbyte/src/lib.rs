@@ -39,6 +39,8 @@ pub const GB: u64 = 1_000_000_000;
 pub const TB: u64 = 1_000_000_000_000;
 /// bytes size for 1 petabyte
 pub const PB: u64 = 1_000_000_000_000_000;
+/// bytes size for 1 exabyte
+pub const EB: u64 = 1_000_000_000_000_000_000;
 
 /// bytes size for 1 kibibyte
 pub const KIB: u64 = 1_024;
@@ -50,6 +52,8 @@ pub const GIB: u64 = 1_073_741_824;
 pub const TIB: u64 = 1_099_511_627_776;
 /// bytes size for 1 pebibyte
 pub const PIB: u64 = 1_125_899_906_842_624;
+/// bytes size for 1 exbibyte
+pub const EIB: u64 = 1_152_921_504_606_846_976;
 
 /// IEC (binary) units.
 ///
@@ -121,6 +125,16 @@ pub fn parse(value: &str) -> Result<u64, ParseError> {
         Ok(v) => {
             let suffix = skip_while(&value[number.len()..], char::is_whitespace);
             match suffix.parse::<Unit>() {
+                // Use exact integer arithmetic when the number has no fractional
+                // part: f64 only has a 53-bit mantissa, so byte counts at or above
+                // 2^53 would otherwise be silently rounded (e.g.
+                // "9007199254740993B" to ...992).
+                Ok(u) if !number.contains('.') => match number.parse::<u64>() {
+                    Ok(n) => n.checked_mul(u64::from(u)).ok_or_else(|| {
+                        ParseError(format!("{:?} overflows a u64 byte count", value))
+                    }),
+                    Err(_) => Ok((v * u64::from(u) as f64) as u64),
+                },
                 Ok(u) => Ok((v * u64::from(u) as f64) as u64),
                 Err(error) => Err(ParseError(format!(
                     "couldn't parse {:?} into a known SI unit, {}",
@@ -171,6 +185,8 @@ where
     &s[(s.len() - offset)..]
 }
 
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Unit {
     Byte,
     // power of tens
@@ -179,12 +195,14 @@ pub enum Unit {
     GigaByte,
     TeraByte,
     PetaByte,
+    ExaByte,
     // power of twos
     KibiByte,
     MebiByte,
     GibiByte,
     TebiByte,
     PebiByte,
+    ExbiByte,
 }
 
 impl From<Unit> for u64 {
@@ -197,12 +215,14 @@ impl From<Unit> for u64 {
             Unit::GigaByte => GB,
             Unit::TeraByte => TB,
             Unit::PetaByte => PB,
+            Unit::ExaByte => EB,
             // power of twos
             Unit::KibiByte => KIB,
             Unit::MebiByte => MIB,
             Unit::GibiByte => GIB,
             Unit::TebiByte => TIB,
             Unit::PebiByte => PIB,
+            Unit::ExbiByte => EIB,
         }
     }
 }
@@ -219,12 +239,14 @@ impl FromStr for Unit {
             "g" | "gb" => Ok(Self::GigaByte),
             "t" | "tb" => Ok(Self::TeraByte),
             "p" | "pb" => Ok(Self::PetaByte),
+            "e" | "eb" => Ok(Self::ExaByte),
             // power of twos
             "ki" | "kib" => Ok(Self::KibiByte),
             "mi" | "mib" => Ok(Self::MebiByte),
             "gi" | "gib" => Ok(Self::GibiByte),
             "ti" | "tib" => Ok(Self::TebiByte),
             "pi" | "pib" => Ok(Self::PebiByte),
+            "ei" | "eib" => Ok(Self::ExbiByte),
             _ => Err(ParseError(format!("couldn't parse unit of {:?}", unit))),
         }
     }
@@ -420,8 +442,34 @@ mod tests {
         assert_eq!(parse("1.5KiB"), Ok(1536));
         assert_eq!(parse("2 mb"), Ok(2_000_000));
         assert_eq!(parse("3 g"), Ok(3_000_000_000));
+        assert_eq!(parse("1 EiB"), Ok(EIB));
+        assert_eq!(parse("2 eb"), Ok(2 * EB));
         assert!(parse("").is_err());
         assert!(parse("1.5 XB").is_err());
+    }
+
+    #[test]
+    fn test_parse_integer_exactness() {
+        // 2^53 + 1 is not representable as f64; the suffix path must not
+        // round it (upstream bytesize#171)
+        assert_eq!(parse("9007199254740993B"), Ok(9_007_199_254_740_993));
+        assert_eq!(parse("9007199254740993 B"), Ok(9_007_199_254_740_993));
+        assert_eq!(parse("18446744073709551615B"), Ok(u64::MAX));
+        // integer overflow errors instead of silently wrapping/saturating
+        assert!(parse("20000 PB").is_err());
+        // fractional values still take the f64 path
+        assert_eq!(parse("1.5 KiB"), Ok(1536));
+    }
+
+    #[test]
+    fn test_display_parse_roundtrip() {
+        // everything we can display must parse back (u64::MAX shows as EiB)
+        for bytes in [0, 1, 999, 1024, KIB, MIB, GIB, TIB, PIB, EIB, u64::MAX] {
+            for format in [Format::IEC, Format::SI] {
+                let s = to_string(bytes, format);
+                assert!(parse(&s).is_ok(), "couldn't parse back {s:?}");
+            }
+        }
     }
 
     #[test]
