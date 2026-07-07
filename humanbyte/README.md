@@ -58,6 +58,38 @@ a la carte fashion:
 * HumanByteOps
 * HumanByteFromStr
 * HumanByteSerde (requires the `serde` feature)
+* HumanByteSchema (requires the `schemars` feature)
+
+## Without a newtype
+
+Plain `u64`/`usize` fields can use human-readable serde directly — no newtype required:
+
+```rust,ignore
+#[derive(Serialize, Deserialize)]
+struct Config {
+    #[serde(with = "humanbyte::serde")]
+    buffer_size: usize,
+    #[serde(with = "humanbyte::serde::map_keys")]
+    pools: BTreeMap<u64, PoolConfig>,
+}
+```
+
+And free functions mirror the derived methods:
+
+```rust
+assert_eq!(humanbyte::parse("1.5 KiB"), Ok(1536));
+assert_eq!(humanbyte::to_string(1536, humanbyte::Format::IEC), "1.5 KiB");
+assert_eq!(
+    humanbyte::to_string_with_precision(1536, humanbyte::Format::IEC, 2),
+    "1.50 KiB"
+);
+```
+
+## JSON schema
+
+With the `schemars` feature, derived types implement `schemars::JsonSchema` (accepting a
+string like `"1.5 KiB"` or a raw byte count), so config types need no manual
+`#[schemars(with = "String")]` annotations.
 
 [bytescale]: https://docs.rs/bytescale/latest/bytescale
 [bytesize]: https://docs.rs/bytesize/latest/bytesize

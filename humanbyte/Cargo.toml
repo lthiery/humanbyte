@@ -12,7 +12,9 @@ default = ["std"]
 std = []
 derive = ["dep:humanbyte-derive"]
 serde = ["dep:serde", "std", "humanbyte-derive/serde"]
+schemars = ["dep:schemars", "std", "humanbyte-derive/schemars"]
 
 [dependencies]
 humanbyte-derive = { version = "0.2.1-alpha.0", path = "../humanbyte-derive", optional = true }
+schemars = { version = "1", optional = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
