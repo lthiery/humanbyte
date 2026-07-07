@@ -7,6 +7,10 @@ description = "A procedural macro for deriving human readable byte functions"
 keywords = ["byte-size", "utility", "human-readable", "no_std"]
 repository = "https://github.com/lthiery/humanbyte"
 license = "Apache-2.0"
+categories = ["development-tools", "filesystem"]
+documentation = "https://docs.rs/humanbyte-derive"
+readme = "README.md"
+rust-version = "1.85"
 
 [lib]
 proc-macro = true
