@@ -1,5 +1,4 @@
 #![no_std]
-#![cfg_attr(not(feature = "std"), no_std)]
 
 //! Common types and functions for byte size handling
 extern crate alloc;
@@ -52,10 +51,6 @@ const UNITS_IEC: &str = "KMGTPE";
 ///
 /// See <https://en.wikipedia.org/wiki/Kilobyte>.
 const UNITS_SI: &str = "kMGTPE";
-/// `ln(1024) ~= 6.931`
-const LN_KIB: f64 = 6.931_471_805_599_453;
-/// `ln(1000) ~= 6.908`
-const LN_KB: f64 = 6.907_755_278_982_137;
 #[derive(Debug, Clone, Default)]
 pub enum Format {
     #[default]
@@ -68,10 +63,6 @@ pub fn to_string(bytes: u64, format: Format) -> String {
         Format::IEC => KIB,
         Format::SI => KB,
     };
-    let unit_base = match format {
-        Format::IEC => LN_KIB,
-        Format::SI => LN_KB,
-    };
     let unit_prefix = match format {
         Format::IEC => UNITS_IEC.as_bytes(),
         Format::SI => UNITS_SI.as_bytes(),
@@ -83,15 +74,18 @@ pub fn to_string(bytes: u64, format: Format) -> String {
     if bytes < unit {
         format!("{} B", bytes)
     } else {
-        let size = bytes as f64;
-        let exp = match (size.ln() / unit_base) as usize {
-            0 => 1,
-            e => e,
-        };
+        // Integer log: largest exp such that bytes >= unit^exp.
+        // (f64::ln is unavailable in core, and this is exact at boundaries.)
+        let mut exp = 0u32;
+        let mut n = bytes;
+        while n >= unit {
+            n /= unit;
+            exp += 1;
+        }
         format!(
             "{:.1} {}{}",
-            (size / unit.pow(exp as u32) as f64),
-            unit_prefix[exp - 1] as char,
+            (bytes as f64 / unit.pow(exp) as f64),
+            unit_prefix[(exp - 1) as usize] as char,
             unit_suffix
         )
     }
