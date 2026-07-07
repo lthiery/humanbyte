@@ -145,9 +145,13 @@ mod tests {
     #[test]
     fn when_err() {
         // shortcut for writing test cases
-        fn parse(s: &str) -> Result<ByteScale, String> {
+        fn parse(s: &str) -> Result<ByteScale, humanbyte::ParseError> {
             s.parse::<ByteScale>()
         }
+
+        // the error type chains with `?` in std contexts
+        fn assert_error<E: std::error::Error>(_: &E) {}
+        assert_error(&parse("oops").unwrap_err());
 
         assert!(parse("").is_err());
         assert!(parse("a124GB").is_err());
@@ -156,6 +160,37 @@ mod tests {
         // The original implementation did not account for the possibility that users may
         // use whitespace to visually separate digits, thus treat it as an error
         assert!(parse("1 000 B").is_err());
+    }
+
+    #[test]
+    fn test_div() {
+        let file_size = ByteScale::gib(4);
+        let chunk_size = ByteScale::mib(64);
+        assert_eq!(file_size / chunk_size, 64u64);
+        assert_eq!(file_size / 4u64, ByteScale::gib(1));
+        assert_eq!(file_size % chunk_size, ByteScale::b(0));
+
+        let mut x = ByteScale::mb(10);
+        x /= 2u64;
+        assert_eq!(x, ByteScale::mb(5));
+    }
+
+    #[test]
+    fn test_to_string_with_precision() {
+        use humanbyte::Format;
+        let x = ByteScale::tib(1);
+        assert_eq!(x.to_string_with_precision(Format::IEC, 2), "1.00 TiB");
+        assert_eq!(x.to_string_with_precision(Format::IEC, 0), "1 TiB");
+        assert_eq!(
+            ByteScale::kib(1) + 512u64,
+            "1.500 KiB".parse::<ByteScale>().unwrap()
+        );
+    }
+
+    #[test]
+    fn test_standalone_parse() {
+        // no newtype required
+        assert_eq!(humanbyte::parse("1.5 KiB"), Ok(1536));
     }
 
     #[test]
@@ -199,5 +234,63 @@ mod tests {
         // i64 MAX
         let s: S = toml::from_str(r#"x = "9223372036854775807""#).unwrap();
         assert_eq!(s.x, "9223372036854775807".parse::<ByteScale>().unwrap());
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_serde_with_plain_integers() {
+        use std::collections::BTreeMap;
+
+        use serde::{Deserialize, Serialize};
+
+        #[derive(Serialize, Deserialize, PartialEq, Debug)]
+        struct Config {
+            #[serde(with = "humanbyte::serde")]
+            buffer_size: usize,
+            #[serde(with = "humanbyte::serde")]
+            max_size: u64,
+            #[serde(with = "humanbyte::serde::map_keys")]
+            pools: BTreeMap<u64, String>,
+        }
+
+        let config: Config = serde_json::from_str(
+            r#"{
+                "buffer_size": "1.5 KiB",
+                "max_size": 1048576,
+                "pools": { "4 KiB": "small", "2 MiB": "large" }
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(config.buffer_size, 1536);
+        assert_eq!(config.max_size, 1_048_576);
+        assert_eq!(config.pools[&4096], "small");
+        assert_eq!(config.pools[&2_097_152], "large");
+
+        // roundtrip: serializes human-readable, parses back to the same values
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(json.contains(r#""buffer_size":"1.5 KiB""#));
+        assert!(json.contains(r#""4.0 KiB":"small""#));
+        let back: Config = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, config);
+
+        // toml too
+        let config: Config = toml::from_str(
+            "buffer_size = \"2 KiB\"\nmax_size = \"1 MiB\"\n[pools]\n\"64 KiB\" = \"medium\"",
+        )
+        .unwrap();
+        assert_eq!(config.buffer_size, 2048);
+        assert_eq!(config.pools[&65536], "medium");
+    }
+
+    #[cfg(feature = "schemars")]
+    #[test]
+    fn test_json_schema() {
+        let schema = schemars::schema_for!(ByteScale);
+        let json = serde_json::to_value(&schema).unwrap();
+        assert_eq!(
+            json["type"],
+            serde_json::json!(["string", "integer"]),
+            "schema should accept both forms: {json}"
+        );
     }
 }

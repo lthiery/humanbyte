@@ -6,10 +6,18 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
+/// Re-export of the `serde` crate for use by derive-generated code.
 #[cfg(feature = "serde")]
-pub use serde;
+#[doc(hidden)]
+pub use ::serde as serde_crate;
+
+/// Re-export of the `schemars` crate for use by derive-generated code.
+#[cfg(feature = "schemars")]
+#[doc(hidden)]
+pub use ::schemars as schemars_crate;
 
 // Re-export necessary types to avoid users needing explicit extern crate declarations
+pub use alloc::borrow::Cow;
 pub use alloc::{
     format,
     string::{String, ToString},
@@ -51,14 +59,22 @@ const UNITS_IEC: &str = "KMGTPE";
 ///
 /// See <https://en.wikipedia.org/wiki/Kilobyte>.
 const UNITS_SI: &str = "kMGTPE";
-#[derive(Debug, Clone, Default)]
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Format {
     #[default]
     IEC,
     SI,
 }
 
+/// Formats `bytes` as a human-readable string with one decimal, e.g. `"1.5 KiB"`.
 pub fn to_string(bytes: u64, format: Format) -> String {
+    to_string_with_precision(bytes, format, 1)
+}
+
+/// Formats `bytes` as a human-readable string with `precision` decimals,
+/// e.g. `to_string_with_precision(1 << 40, Format::IEC, 2)` is `"1.00 TiB"`.
+pub fn to_string_with_precision(bytes: u64, format: Format, precision: usize) -> String {
     let unit = match format {
         Format::IEC => KIB,
         Format::SI => KB,
@@ -83,7 +99,8 @@ pub fn to_string(bytes: u64, format: Format) -> String {
             exp += 1;
         }
         format!(
-            "{:.1} {}{}",
+            "{:.*} {}{}",
+            precision,
             (bytes as f64 / unit.pow(exp) as f64),
             unit_prefix[(exp - 1) as usize] as char,
             unit_suffix
@@ -91,7 +108,34 @@ pub fn to_string(bytes: u64, format: Format) -> String {
     }
 }
 
-#[derive(Debug)]
+/// Parses a human-readable byte size string into a byte count, e.g. `"1.5 KiB"` to `1536`.
+///
+/// Accepts a plain integer, or a number followed by an optional SI/IEC unit
+/// (case-insensitive): `"1024"`, `"1.5 KB"`, `"2MiB"`, `"3 g"`.
+pub fn parse(value: &str) -> Result<u64, ParseError> {
+    if let Ok(v) = value.parse::<u64>() {
+        return Ok(v);
+    }
+    let number = take_while(value, |c| c.is_ascii_digit() || c == '.');
+    match number.parse::<f64>() {
+        Ok(v) => {
+            let suffix = skip_while(&value[number.len()..], char::is_whitespace);
+            match suffix.parse::<Unit>() {
+                Ok(u) => Ok((v * u64::from(u) as f64) as u64),
+                Err(error) => Err(ParseError(format!(
+                    "couldn't parse {:?} into a known SI unit, {}",
+                    suffix, error
+                ))),
+            }
+        }
+        Err(error) => Err(ParseError(format!(
+            "couldn't parse {:?} into a byte size, {}",
+            value, error
+        ))),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParseError(pub String);
 
 impl core::fmt::Display for ParseError {
@@ -164,7 +208,7 @@ impl From<Unit> for u64 {
 }
 
 impl FromStr for Unit {
-    type Err = String;
+    type Err = ParseError;
 
     fn from_str(unit: &str) -> Result<Self, Self::Err> {
         match unit.to_lowercase().as_str() {
@@ -181,7 +225,7 @@ impl FromStr for Unit {
             "gi" | "gib" => Ok(Self::GibiByte),
             "ti" | "tib" => Ok(Self::TebiByte),
             "pi" | "pib" => Ok(Self::PebiByte),
-            _ => Err(format!("couldn't parse unit of {:?}", unit)),
+            _ => Err(ParseError(format!("couldn't parse unit of {:?}", unit))),
         }
     }
 }
@@ -207,5 +251,186 @@ impl<T: From<u64>> core::ops::RangeBounds<T> for HumanByteRange<T> {
 
     fn end_bound(&self) -> core::ops::Bound<&T> {
         core::ops::Bound::Included(&self.stop)
+    }
+}
+
+/// Serde support for plain integer fields, without declaring a newtype.
+///
+/// Serializes as a human-readable string (`"1.5 KiB"`) in human-readable
+/// formats (JSON, TOML, ...) and as a raw integer in binary formats.
+/// Deserializes from either form.
+///
+/// ```ignore
+/// #[derive(Serialize, Deserialize)]
+/// struct Config {
+///     #[serde(with = "humanbyte::serde")]
+///     buffer_size: usize,
+///     #[serde(with = "humanbyte::serde::map_keys")]
+///     pools: BTreeMap<u64, PoolConfig>,
+/// }
+/// ```
+#[cfg(feature = "serde")]
+pub mod serde {
+    use ::serde::{Deserializer, Serializer, de};
+
+    use crate::{Format, to_string};
+
+    pub fn serialize<T, S>(value: &T, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        T: Copy + TryInto<u64>,
+        S: Serializer,
+    {
+        let value: u64 = (*value)
+            .try_into()
+            .map_err(|_| ::serde::ser::Error::custom("byte size doesn't fit in u64"))?;
+        if serializer.is_human_readable() {
+            serializer.serialize_str(&to_string(value, Format::IEC))
+        } else {
+            serializer.serialize_u64(value)
+        }
+    }
+
+    pub fn deserialize<'de, T, D>(deserializer: D) -> Result<T, D::Error>
+    where
+        T: TryFrom<u64>,
+        D: Deserializer<'de>,
+    {
+        let value = if deserializer.is_human_readable() {
+            deserializer.deserialize_any(ByteVisitor)?
+        } else {
+            deserializer.deserialize_u64(ByteVisitor)?
+        };
+        T::try_from(value).map_err(|_| de::Error::custom("byte size overflows target type"))
+    }
+
+    struct ByteVisitor;
+
+    impl de::Visitor<'_> for ByteVisitor {
+        type Value = u64;
+
+        fn expecting(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            formatter.write_str("an integer or a byte size string")
+        }
+
+        fn visit_i64<E: de::Error>(self, value: i64) -> Result<Self::Value, E> {
+            u64::try_from(value).map_err(|_| {
+                E::invalid_value(de::Unexpected::Signed(value), &"a non-negative integer")
+            })
+        }
+
+        fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
+            Ok(value)
+        }
+
+        fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+            crate::parse(value)
+                .map_err(|_| E::invalid_value(de::Unexpected::Str(value), &"a byte size string"))
+        }
+    }
+
+    /// Like the parent module, but for `BTreeMap`s keyed by byte sizes.
+    pub mod map_keys {
+        use alloc::collections::BTreeMap;
+
+        use ::serde::ser::SerializeMap;
+        use ::serde::{Deserialize, Deserializer, Serialize, Serializer, de};
+
+        use super::{ByteVisitor, Format, to_string};
+
+        pub fn serialize<K, V, S>(map: &BTreeMap<K, V>, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            K: Copy + TryInto<u64>,
+            V: Serialize,
+            S: Serializer,
+        {
+            let human_readable = serializer.is_human_readable();
+            let mut ser = serializer.serialize_map(Some(map.len()))?;
+            for (key, value) in map {
+                let key: u64 = (*key)
+                    .try_into()
+                    .map_err(|_| ::serde::ser::Error::custom("byte size doesn't fit in u64"))?;
+                if human_readable {
+                    ser.serialize_entry(&to_string(key, Format::IEC), value)?;
+                } else {
+                    ser.serialize_entry(&key, value)?;
+                }
+            }
+            ser.end()
+        }
+
+        pub fn deserialize<'de, K, V, D>(deserializer: D) -> Result<BTreeMap<K, V>, D::Error>
+        where
+            K: TryFrom<u64> + Ord,
+            V: Deserialize<'de>,
+            D: Deserializer<'de>,
+        {
+            struct Key<K>(K);
+
+            impl<'de, K: TryFrom<u64>> Deserialize<'de> for Key<K> {
+                fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                    let value = if deserializer.is_human_readable() {
+                        deserializer.deserialize_any(ByteVisitor)?
+                    } else {
+                        deserializer.deserialize_u64(ByteVisitor)?
+                    };
+                    K::try_from(value)
+                        .map(Key)
+                        .map_err(|_| de::Error::custom("byte size overflows target type"))
+                }
+            }
+
+            struct MapVisitor<K, V>(core::marker::PhantomData<(K, V)>);
+
+            impl<'de, K, V> de::Visitor<'de> for MapVisitor<K, V>
+            where
+                K: TryFrom<u64> + Ord,
+                V: Deserialize<'de>,
+            {
+                type Value = BTreeMap<K, V>;
+
+                fn expecting(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                    formatter.write_str("a map keyed by byte sizes")
+                }
+
+                fn visit_map<A: de::MapAccess<'de>>(
+                    self,
+                    mut access: A,
+                ) -> Result<Self::Value, A::Error> {
+                    let mut map = BTreeMap::new();
+                    while let Some((Key(key), value)) = access.next_entry::<Key<K>, V>()? {
+                        map.insert(key, value);
+                    }
+                    Ok(map)
+                }
+            }
+
+            deserializer.deserialize_map(MapVisitor(core::marker::PhantomData))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse() {
+        assert_eq!(parse("1024"), Ok(1024));
+        assert_eq!(parse("1 KiB"), Ok(1024));
+        assert_eq!(parse("1.5KiB"), Ok(1536));
+        assert_eq!(parse("2 mb"), Ok(2_000_000));
+        assert_eq!(parse("3 g"), Ok(3_000_000_000));
+        assert!(parse("").is_err());
+        assert!(parse("1.5 XB").is_err());
+    }
+
+    #[test]
+    fn test_precision() {
+        assert_eq!(to_string_with_precision(TIB, Format::IEC, 2), "1.00 TiB");
+        assert_eq!(to_string_with_precision(1536, Format::IEC, 0), "2 KiB");
+        assert_eq!(to_string_with_precision(1536, Format::IEC, 3), "1.500 KiB");
+        // sub-unit values are plain byte counts regardless of precision
+        assert_eq!(to_string_with_precision(215, Format::IEC, 2), "215 B");
+        assert_eq!(to_string(TIB, Format::IEC), "1.0 TiB");
     }
 }

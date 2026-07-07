@@ -12,6 +12,7 @@ proc-macro = true
 
 [features]
 default = []
+schemars = []
 serde = []
 
 [dependencies]

@@ -15,6 +15,7 @@ default = ["std", "derive"]
 std = ["humanbyte/std"]
 derive = []
 arbitrary = ["dep:arbitrary", "std"]
+schemars = ["humanbyte/schemars"]
 serde = ["humanbyte/serde"]
 
 [dependencies]
@@ -22,6 +23,7 @@ arbitrary = { version = "1", features = ["derive"], optional = true }
 humanbyte = { version = "0.2.1-alpha.0", path = "../humanbyte", features = ["derive"] }
 
 [dev-dependencies]
+schemars = "1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["std"] }
 toml = "0.8"

@@ -16,6 +16,9 @@ pub fn humanbyte(input: TokenStream) -> TokenStream {
     if cfg!(feature = "serde") {
         combined.extend(serde_tokens(name));
     }
+    if cfg!(feature = "schemars") {
+        combined.extend(schemars_tokens(name));
+    }
     TokenStream::from(combined)
 }
 
@@ -185,6 +188,47 @@ fn ops_tokens(name: &syn::Ident) -> proc_macro2::TokenStream {
             }
         }
 
+        impl core::ops::Div<#name> for #name {
+            /// Dividing two byte sizes yields a dimensionless count,
+            /// e.g. `file_size / chunk_size` chunks.
+            type Output = u64;
+
+            #[inline(always)]
+            fn div(self, rhs: #name) -> u64 {
+                self.0 / rhs.0
+            }
+        }
+
+        impl<T> core::ops::Div<T> for #name
+        where
+            T: Into<u64>,
+        {
+            type Output = #name;
+            #[inline(always)]
+            fn div(self, rhs: T) -> #name {
+                #name(self.0 / rhs.into())
+            }
+        }
+
+        impl<T> core::ops::DivAssign<T> for #name
+        where
+            T: Into<u64>,
+        {
+            #[inline(always)]
+            fn div_assign(&mut self, rhs: T) {
+                self.0 /= rhs.into();
+            }
+        }
+
+        impl core::ops::Rem<#name> for #name {
+            type Output = #name;
+
+            #[inline(always)]
+            fn rem(self, rhs: #name) -> #name {
+                #name(self.0 % rhs.0)
+            }
+        }
+
         impl core::ops::Add<#name> for u64 {
             type Output = #name;
             #[inline(always)]
@@ -327,29 +371,10 @@ pub fn humanbyte_fromstr(input: TokenStream) -> TokenStream {
 fn fromstr_tokens(name: &syn::Ident) -> proc_macro2::TokenStream {
     quote! {
         impl core::str::FromStr for #name {
-            type Err = ::humanbyte::String;
+            type Err = ::humanbyte::ParseError;
 
             fn from_str(value: &str) -> core::result::Result<Self, Self::Err> {
-                if let Ok(v) = value.parse::<u64>() {
-                    return Ok(Self(v));
-                }
-                let number = ::humanbyte::take_while(value, |c| c.is_ascii_digit() || c == '.');
-                match number.parse::<f64>() {
-                    Ok(v) => {
-                        let suffix = ::humanbyte::skip_while(&value[number.len()..], char::is_whitespace);
-                        match suffix.parse::<::humanbyte::Unit>() {
-                            Ok(u) => Ok(Self((v * u64::from(u) as f64) as u64)),
-                            Err(error) => Err(::humanbyte::format!(
-                                "couldn't parse {:?} into a known SI unit, {}",
-                                suffix, error
-                            )),
-                        }
-                    }
-                    Err(error) => Err(::humanbyte::format!(
-                        "couldn't parse {:?} into a ByteSize, {}",
-                        value, error
-                    )),
-                }
+                ::humanbyte::parse(value).map(Self)
             }
         }
     }
@@ -368,6 +393,16 @@ fn parse_tokens(name: &syn::Ident) -> proc_macro2::TokenStream {
             #[inline(always)]
             pub fn to_string_as(&self, format: ::humanbyte::Format) -> ::humanbyte::String {
                 ::humanbyte::to_string(self.0, format)
+            }
+
+            /// Returns the size as a string with the given number of decimals.
+            #[inline(always)]
+            pub fn to_string_with_precision(
+                &self,
+                format: ::humanbyte::Format,
+                precision: usize,
+            ) -> ::humanbyte::String {
+                ::humanbyte::to_string_with_precision(self.0, format, precision)
             }
 
             /// Returns the inner u64 value.
@@ -394,41 +429,41 @@ pub fn humanbyte_serde(input: TokenStream) -> TokenStream {
 
 fn serde_tokens(name: &syn::Ident) -> proc_macro2::TokenStream {
     quote! {
-        impl<'de> ::humanbyte::serde::Deserialize<'de> for #name {
+        impl<'de> ::humanbyte::serde_crate::Deserialize<'de> for #name {
             fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
             where
-                D: ::humanbyte::serde::Deserializer<'de>,
+                D: ::humanbyte::serde_crate::Deserializer<'de>,
             {
                 struct ByteSizeVisitor;
 
-                impl<'de> ::humanbyte::serde::de::Visitor<'de> for ByteSizeVisitor {
+                impl<'de> ::humanbyte::serde_crate::de::Visitor<'de> for ByteSizeVisitor {
                     type Value = #name;
 
                     fn expecting(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
                         formatter.write_str("an integer or string")
                     }
 
-                    fn visit_i64<E: ::humanbyte::serde::de::Error>(self, value: i64) -> core::result::Result<Self::Value, E> {
+                    fn visit_i64<E: ::humanbyte::serde_crate::de::Error>(self, value: i64) -> core::result::Result<Self::Value, E> {
                         if let Ok(val) = u64::try_from(value) {
                             Ok(#name(val))
                         } else {
                             Err(E::invalid_value(
-                                ::humanbyte::serde::de::Unexpected::Signed(value),
+                                ::humanbyte::serde_crate::de::Unexpected::Signed(value),
                                 &"integer overflow",
                             ))
                         }
                     }
 
-                    fn visit_u64<E: ::humanbyte::serde::de::Error>(self, value: u64) -> core::result::Result<Self::Value, E> {
+                    fn visit_u64<E: ::humanbyte::serde_crate::de::Error>(self, value: u64) -> core::result::Result<Self::Value, E> {
                         Ok(#name(value))
                     }
 
-                    fn visit_str<E: ::humanbyte::serde::de::Error>(self, value: &str) -> core::result::Result<Self::Value, E> {
+                    fn visit_str<E: ::humanbyte::serde_crate::de::Error>(self, value: &str) -> core::result::Result<Self::Value, E> {
                         if let Ok(val) = value.parse() {
                             Ok(val)
                         } else {
                             Err(E::invalid_value(
-                                ::humanbyte::serde::de::Unexpected::Str(value),
+                                ::humanbyte::serde_crate::de::Unexpected::Str(value),
                                 &"parsable string",
                             ))
                         }
@@ -442,16 +477,45 @@ fn serde_tokens(name: &syn::Ident) -> proc_macro2::TokenStream {
                 }
             }
         }
-        impl ::humanbyte::serde::Serialize for #name {
+        impl ::humanbyte::serde_crate::Serialize for #name {
             fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
             where
-                S: ::humanbyte::serde::Serializer,
+                S: ::humanbyte::serde_crate::Serializer,
             {
                 if serializer.is_human_readable() {
                     <str>::serialize(self.to_string().as_str(), serializer)
                 } else {
                     self.0.serialize(serializer)
                 }
+            }
+        }
+    }
+}
+
+#[proc_macro_derive(HumanByteSchema)]
+pub fn humanbyte_schema(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    TokenStream::from(schemars_tokens(&input.ident))
+}
+
+fn schemars_tokens(name: &syn::Ident) -> proc_macro2::TokenStream {
+    quote! {
+        impl ::humanbyte::schemars_crate::JsonSchema for #name {
+            fn schema_name() -> ::humanbyte::Cow<'static, str> {
+                ::humanbyte::Cow::Borrowed(stringify!(#name))
+            }
+
+            fn schema_id() -> ::humanbyte::Cow<'static, str> {
+                ::humanbyte::Cow::Borrowed(concat!(module_path!(), "::", stringify!(#name)))
+            }
+
+            fn json_schema(
+                _generator: &mut ::humanbyte::schemars_crate::SchemaGenerator,
+            ) -> ::humanbyte::schemars_crate::Schema {
+                ::humanbyte::schemars_crate::json_schema!({
+                    "type": ["string", "integer"],
+                    "description": "A byte size, as either a human-readable string (e.g. \"1.5 KiB\") or a number of bytes",
+                })
             }
         }
     }
