@@ -7,8 +7,8 @@ keywords = ["byte", "utility", "human-readable", "format"]
 categories = ["development-tools", "filesystem"]
 repository = "https://github.com/lthiery/humanbyte"
 license = "Apache-2.0"
-edition = "2021"
-rust-version = "1.65"
+edition = "2024"
+rust-version = "1.85"
 
 [features]
 default = ["std", "derive"]
