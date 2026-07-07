@@ -159,6 +159,13 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "byte size overflows u64")]
+    fn test_constructor_overflow() {
+        // 20,000 PB doesn't fit in u64
+        let _ = ByteScale::pb(20_000);
+    }
+
+    #[test]
     fn test_default() {
         assert_eq!(ByteScale::b(0), ByteScale::default());
     }
