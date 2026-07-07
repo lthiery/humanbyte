@@ -1,10 +1,11 @@
 [package]
 name = "humanbyte"
-version = "0.2.1-alpha.0"
+version = "0.3.0"
 edition = "2024"
 authors = ["Louis Thiery <thiery.louis@gmail.com>"]
 description = "A procedural macro for deriving human readable byte functions"
 keywords = ["byte-size", "utility", "human-readable", "no_std"]
+repository = "https://github.com/lthiery/humanbyte"
 license = "Apache-2.0"
 
 [features]
@@ -15,6 +16,6 @@ serde = ["dep:serde", "std", "humanbyte-derive/serde"]
 schemars = ["dep:schemars", "std", "humanbyte-derive/schemars"]
 
 [dependencies]
-humanbyte-derive = { version = "0.2.1-alpha.0", path = "../humanbyte-derive", optional = true }
+humanbyte-derive = { version = "0.3.0", path = "../humanbyte-derive", optional = true }
 schemars = { version = "1", optional = true }
 serde = { version = "1.0", features = ["derive"], optional = true }

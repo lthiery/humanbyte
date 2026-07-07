@@ -1,10 +1,11 @@
 [package]
 name = "humanbyte-derive"
-version = "0.2.1-alpha.0"
+version = "0.3.0"
 edition = "2024"
 authors = ["Louis Thiery <thiery.louis@gmail.com>"]
 description = "A procedural macro for deriving human readable byte functions"
 keywords = ["byte-size", "utility", "human-readable", "no_std"]
+repository = "https://github.com/lthiery/humanbyte"
 license = "Apache-2.0"
 
 [lib]
