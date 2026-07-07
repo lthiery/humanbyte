@@ -42,6 +42,8 @@ fn constructor_tokens(name: &syn::Ident) -> proc_macro2::TokenStream {
         ("tib", "::humanbyte::TIB", "tebibytes"),
         ("pb", "::humanbyte::PB", "petabytes"),
         ("pib", "::humanbyte::PIB", "pebibytes"),
+        ("eb", "::humanbyte::EB", "exabytes"),
+        ("eib", "::humanbyte::EIB", "exbibytes"),
     ];
 
     // Generate methods
@@ -71,9 +73,25 @@ fn constructor_tokens(name: &syn::Ident) -> proc_macro2::TokenStream {
         }
     });
 
+    // Generate float accessors (skipping bytes, which has as_u64 in the parse derive)
+    let accessors = units[1..].iter().map(|(unit, multiplier, description)| {
+        let method_name = syn::Ident::new(&format!("as_{}", unit), Span::call_site());
+        let multiplier_expr: syn::Expr = syn::parse_str(multiplier).unwrap();
+        let doc_comment = format!("Returns the size in {} as a float.", description);
+
+        quote! {
+            #[doc = #doc_comment]
+            #[inline(always)]
+            pub fn #method_name(&self) -> f64 {
+                self.0 as f64 / #multiplier_expr as f64
+            }
+        }
+    });
+
     quote! {
         impl #name {
             #(#methods)*
+            #(#accessors)*
         }
 
         impl From<u64> for #name {
@@ -229,6 +247,18 @@ fn ops_tokens(name: &syn::Ident) -> proc_macro2::TokenStream {
             }
         }
 
+        impl core::iter::Sum<#name> for #name {
+            fn sum<I: Iterator<Item = #name>>(iter: I) -> #name {
+                iter.fold(#name(0), |acc, x| #name(acc.0 + x.0))
+            }
+        }
+
+        impl<'a> core::iter::Sum<&'a #name> for #name {
+            fn sum<I: Iterator<Item = &'a #name>>(iter: I) -> #name {
+                iter.fold(#name(0), |acc, x| #name(acc.0 + x.0))
+            }
+        }
+
         impl core::ops::Add<#name> for u64 {
             type Output = #name;
             #[inline(always)]
@@ -350,7 +380,32 @@ fn display_tokens(name: &syn::Ident) -> proc_macro2::TokenStream {
     quote! {
         impl core::fmt::Display for #name {
             fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
-                f.pad(&::humanbyte::to_string(self.0, ::humanbyte::Format::IEC))
+                use core::fmt::Write as _;
+
+                // Interpret formatter precision as decimals: "{:.2}" is "1.50 KiB".
+                // Width/alignment are handled manually because Formatter::pad
+                // would reinterpret the precision as string truncation.
+                let precision = f.precision().unwrap_or(1);
+                let s = ::humanbyte::to_string_with_precision(
+                    self.0,
+                    ::humanbyte::Format::IEC,
+                    precision,
+                );
+                let pad = f.width().unwrap_or(0).saturating_sub(s.len());
+                let (left, right) = match f.align() {
+                    Some(core::fmt::Alignment::Right) => (pad, 0),
+                    Some(core::fmt::Alignment::Center) => (pad / 2, pad - pad / 2),
+                    // strings left-align by default
+                    _ => (0, pad),
+                };
+                for _ in 0..left {
+                    f.write_char(f.fill())?;
+                }
+                f.write_str(&s)?;
+                for _ in 0..right {
+                    f.write_char(f.fill())?;
+                }
+                Ok(())
             }
         }
 
