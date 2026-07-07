@@ -5,26 +5,27 @@ use syn::{DeriveInput, parse_macro_input};
 
 #[proc_macro_derive(HumanByte)]
 pub fn humanbyte(input: TokenStream) -> TokenStream {
-    let input_str = input.to_string();
-    let constructor = humanbyte_constructor(input_str.parse().unwrap());
-    let display = humanbyte_display(input_str.parse().unwrap());
-    let parse = humanbyte_parse(input_str.parse().unwrap());
-    let ops = humanbyte_ops(input_str.parse().unwrap());
-    let fromstr = humanbyte_fromstr(input_str.parse().unwrap());
+    let input = parse_macro_input!(input as DeriveInput);
+    let name = &input.ident;
 
-    let mut combined = format!("{}{}{}{}{}", constructor, display, parse, ops, fromstr);
+    let mut combined = constructor_tokens(name);
+    combined.extend(display_tokens(name));
+    combined.extend(parse_tokens(name));
+    combined.extend(ops_tokens(name));
+    combined.extend(fromstr_tokens(name));
     if cfg!(feature = "serde") {
-        let serde = humanbyte_serde(input_str.parse().unwrap());
-        combined = format!("{}{}", combined, serde);
+        combined.extend(serde_tokens(name));
     }
-    combined.parse().unwrap()
+    TokenStream::from(combined)
 }
 
 #[proc_macro_derive(HumanByteConstructor)]
 pub fn humanbyte_constructor(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    let name = &input.ident;
+    TokenStream::from(constructor_tokens(&input.ident))
+}
 
+fn constructor_tokens(name: &syn::Ident) -> proc_macro2::TokenStream {
     // Define units with their multipliers and descriptions
     let units = vec![
         ("b", "1", "bytes"),
@@ -49,19 +50,25 @@ pub fn humanbyte_constructor(input: TokenStream) -> TokenStream {
         let multiplier_expr: syn::Expr = syn::parse_str(multiplier).unwrap();
 
         // Generate the documentation comment
-        let doc_comment = format!("Construct `{}` given an amount of {}.", name, description);
+        let doc_comment = format!(
+            "Construct `{}` given an amount of {}.\n\nPanics if the total byte count overflows `u64`.",
+            name, description
+        );
 
         // Generate the method using quote!
         quote! {
             #[doc = #doc_comment]
             #[inline(always)]
             pub const fn #method_name(size: u64) -> Self {
-                Self(size * #multiplier_expr)
+                match size.checked_mul(#multiplier_expr) {
+                    Some(bytes) => Self(bytes),
+                    None => panic!("byte size overflows u64"),
+                }
             }
         }
     });
 
-    let expanded = quote! {
+    quote! {
         impl #name {
             #(#methods)*
         }
@@ -71,17 +78,17 @@ pub fn humanbyte_constructor(input: TokenStream) -> TokenStream {
                 Self(size)
             }
         }
-    };
-
-    TokenStream::from(expanded)
+    }
 }
 
 #[proc_macro_derive(HumanByteOps)]
 pub fn humanbyte_ops(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    let name = &input.ident;
+    TokenStream::from(ops_tokens(&input.ident))
+}
 
-    let expanded = quote! {
+fn ops_tokens(name: &syn::Ident) -> proc_macro2::TokenStream {
+    quote! {
         impl core::ops::Add<#name> for #name {
             type Output = #name;
 
@@ -281,22 +288,22 @@ pub fn humanbyte_ops(input: TokenStream) -> TokenStream {
                 ::humanbyte::HumanByteRange::new(Some(start), None)
             }
 
-            /// Provides `HumanByteRange` with explicit lower bound. Upper bound is set to `u64::MAX`.
+            /// Provides `HumanByteRange` with explicit upper bound. Lower bound is set to `0`.
             pub fn range_stop<I: Into<Self>>(stop: I) -> ::humanbyte::HumanByteRange<Self> {
                 ::humanbyte::HumanByteRange::new(None, Some(stop.into()))
             }
         }
-    };
-
-    TokenStream::from(expanded)
+    }
 }
 
 #[proc_macro_derive(HumanByteDisplay)]
 pub fn humanbyte_display(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    let name = &input.ident;
+    TokenStream::from(display_tokens(&input.ident))
+}
 
-    let expanded = quote! {
+fn display_tokens(name: &syn::Ident) -> proc_macro2::TokenStream {
+    quote! {
         impl core::fmt::Display for #name {
             fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
                 f.pad(&::humanbyte::to_string(self.0, ::humanbyte::Format::IEC))
@@ -308,17 +315,17 @@ pub fn humanbyte_display(input: TokenStream) -> TokenStream {
                 write!(f, "{}", self)
             }
         }
-    };
-
-    TokenStream::from(expanded)
+    }
 }
 
 #[proc_macro_derive(HumanByteFromStr)]
 pub fn humanbyte_fromstr(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    let name = &input.ident;
+    TokenStream::from(fromstr_tokens(&input.ident))
+}
 
-    let expanded = quote! {
+fn fromstr_tokens(name: &syn::Ident) -> proc_macro2::TokenStream {
+    quote! {
         impl core::str::FromStr for #name {
             type Err = ::humanbyte::String;
 
@@ -345,17 +352,17 @@ pub fn humanbyte_fromstr(input: TokenStream) -> TokenStream {
                 }
             }
         }
-    };
-
-    TokenStream::from(expanded)
+    }
 }
 
 #[proc_macro_derive(HumanByteParse)]
 pub fn humanbyte_parse(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    let name = &input.ident;
+    TokenStream::from(parse_tokens(&input.ident))
+}
 
-    let expanded = quote! {
+fn parse_tokens(name: &syn::Ident) -> proc_macro2::TokenStream {
+    quote! {
         impl #name {
             /// Returns the size as a string with an optional SI unit.
             #[inline(always)]
@@ -376,25 +383,25 @@ pub fn humanbyte_parse(input: TokenStream) -> TokenStream {
                 self.0 as usize
             }
         }
-    };
-
-    TokenStream::from(expanded)
+    }
 }
 
 #[proc_macro_derive(HumanByteSerde)]
 pub fn humanbyte_serde(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    let name = &input.ident;
+    TokenStream::from(serde_tokens(&input.ident))
+}
 
-    let expanded = quote! {
+fn serde_tokens(name: &syn::Ident) -> proc_macro2::TokenStream {
+    quote! {
         impl<'de> ::humanbyte::serde::Deserialize<'de> for #name {
             fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
             where
                 D: ::humanbyte::serde::Deserializer<'de>,
             {
-                struct ByteSizeVistor;
+                struct ByteSizeVisitor;
 
-                impl<'de> ::humanbyte::serde::de::Visitor<'de> for ByteSizeVistor {
+                impl<'de> ::humanbyte::serde::de::Visitor<'de> for ByteSizeVisitor {
                     type Value = #name;
 
                     fn expecting(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -429,9 +436,9 @@ pub fn humanbyte_serde(input: TokenStream) -> TokenStream {
                 }
 
                 if deserializer.is_human_readable() {
-                    deserializer.deserialize_any(ByteSizeVistor)
+                    deserializer.deserialize_any(ByteSizeVisitor)
                 } else {
-                    deserializer.deserialize_u64(ByteSizeVistor)
+                    deserializer.deserialize_u64(ByteSizeVisitor)
                 }
             }
         }
@@ -447,7 +454,5 @@ pub fn humanbyte_serde(input: TokenStream) -> TokenStream {
                 }
             }
         }
-    };
-
-    TokenStream::from(expanded)
+    }
 }
