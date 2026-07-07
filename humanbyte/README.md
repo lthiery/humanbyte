@@ -16,21 +16,21 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-humanbyte = { version = "0.3", features = ["serde"] }
+humanbyte = { version = "0.4", features = ["serde"] }
 ```
 
 ### without serde support
 
 ```toml
 [dependencies]
-humanbyte = { version = "0.3" }
+humanbyte = { version = "0.4" }
 ```
 
 ### no_std compatible
 
 ```toml
 [dependencies]
-humanbyte = { version = "0.3", no-default-features = true }
+humanbyte = { version = "0.4", no-default-features = true }
 ```
 
 Define your new type and derive `HumanByte` for it. This will derive all the necessary functions for your new type. You

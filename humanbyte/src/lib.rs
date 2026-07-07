@@ -65,10 +65,23 @@ const UNITS_IEC: &str = "KMGTPE";
 const UNITS_SI: &str = "kMGTPE";
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Format {
     #[default]
     IEC,
     SI,
+    /// IEC (binary) units in a short style, e.g. `11.8M`.
+    ///
+    /// No space, no `iB` suffix. Designed to produce output compatible with `sort -h`.
+    ///
+    /// Note: [`parse`] interprets bare prefixes like `M` as *decimal* units, so
+    /// short IEC output does not round-trip exactly; prefer [`Format::IEC`] for
+    /// values that will be parsed back.
+    IECShort,
+    /// SI (decimal) units in a short style, e.g. `12.3M`.
+    ///
+    /// No space, no `B` suffix.
+    SIShort,
 }
 
 /// Formats `bytes` as a human-readable string with one decimal, e.g. `"1.5 KiB"`.
@@ -80,19 +93,24 @@ pub fn to_string(bytes: u64, format: Format) -> String {
 /// e.g. `to_string_with_precision(1 << 40, Format::IEC, 2)` is `"1.00 TiB"`.
 pub fn to_string_with_precision(bytes: u64, format: Format, precision: usize) -> String {
     let unit = match format {
-        Format::IEC => KIB,
-        Format::SI => KB,
+        Format::IEC | Format::IECShort => KIB,
+        Format::SI | Format::SIShort => KB,
     };
     let unit_prefix = match format {
-        Format::IEC => UNITS_IEC.as_bytes(),
-        Format::SI => UNITS_SI.as_bytes(),
+        Format::IEC | Format::IECShort => UNITS_IEC.as_bytes(),
+        Format::SI | Format::SIShort => UNITS_SI.as_bytes(),
+    };
+    let unit_separator = match format {
+        Format::IEC | Format::SI => " ",
+        Format::IECShort | Format::SIShort => "",
     };
     let unit_suffix = match format {
         Format::IEC => "iB",
         Format::SI => "B",
+        Format::IECShort | Format::SIShort => "",
     };
     if bytes < unit {
-        format!("{} B", bytes)
+        format!("{}{}B", bytes, unit_separator)
     } else {
         // Integer log: largest exp such that bytes >= unit^exp.
         // (f64::ln is unavailable in core, and this is exact at boundaries.)
@@ -103,9 +121,10 @@ pub fn to_string_with_precision(bytes: u64, format: Format, precision: usize) ->
             exp += 1;
         }
         format!(
-            "{:.*} {}{}",
+            "{:.*}{}{}{}",
             precision,
             (bytes as f64 / unit.pow(exp) as f64),
+            unit_separator,
             unit_prefix[(exp - 1) as usize] as char,
             unit_suffix
         )
@@ -470,6 +489,21 @@ mod tests {
                 assert!(parse(&s).is_ok(), "couldn't parse back {s:?}");
             }
         }
+    }
+
+    #[test]
+    fn test_short_formats() {
+        assert_eq!(to_string(1536, Format::IECShort), "1.5K");
+        assert_eq!(to_string(1536, Format::SIShort), "1.5k");
+        assert_eq!(to_string(215, Format::IECShort), "215B");
+        assert_eq!(to_string(12_300_000, Format::SIShort), "12.3M");
+        assert_eq!(
+            to_string_with_precision(GIB + 512 * MIB, Format::IECShort, 0),
+            "2G"
+        );
+        // long formats unchanged
+        assert_eq!(to_string(1536, Format::IEC), "1.5 KiB");
+        assert_eq!(to_string(215, Format::IEC), "215 B");
     }
 
     #[test]
