@@ -1,7 +1,7 @@
 [package]
 name = "bytescale"
 description = "Demonstration of humanbyte usage for human readable byte functions"
-version = "0.3.0"
+version = "0.4.0"
 authors = ["Louis Thiery <thiery.louis@gmail.com>"]
 keywords = ["byte", "utility", "human-readable", "format"]
 categories = ["development-tools", "filesystem"]
@@ -22,7 +22,7 @@ serde = ["humanbyte/serde"]
 
 [dependencies]
 arbitrary = { version = "1", features = ["derive"], optional = true }
-humanbyte = { version = "0.3.0", path = "../humanbyte", features = ["derive"] }
+humanbyte = { version = "0.4.0", path = "../humanbyte", features = ["derive"] }
 
 [dev-dependencies]
 schemars = "1"
