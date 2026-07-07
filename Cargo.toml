@@ -1,7 +1,3 @@
 [workspace]
-members = [
-    "bytescale",
-    "humanbyte",
-    "humanbyte-derive"
-]
+members = ["bytescale", "humanbyte", "humanbyte-derive"]
 resolver = "2"

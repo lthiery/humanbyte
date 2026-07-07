@@ -44,7 +44,7 @@ mod tests {
     fn test_arithmetic_primitives() {
         let mut x = ByteScale::mb(1);
 
-        assert_eq!((x + MB as u64).as_u64(), 2_000_000);
+        assert_eq!((x + MB).as_u64(), 2_000_000);
 
         assert_eq!((x + MB as u32).as_u64(), 2_000_000);
 
@@ -60,7 +60,7 @@ mod tests {
 
         assert_eq!((x - B as u32).as_u64(), 999_999);
 
-        x += MB as u64;
+        x += MB;
         x += MB as u32;
         x += 10u16;
         x += 1u8;
