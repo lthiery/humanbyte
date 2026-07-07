@@ -20,7 +20,7 @@ pub use self::ByteScale as _doc_ByteScale;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use humanbyte::{Format, B, KB, MB};
+    use humanbyte::{B, Format, KB, MB};
 
     #[test]
     fn test_arithmetic_op() {
